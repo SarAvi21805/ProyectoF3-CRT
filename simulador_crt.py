@@ -25,6 +25,33 @@ BEAM_COLOR = (50, 255, 50)
 PLATE_COLOR = (200, 200, 0)
 CURRENT_IMPACT_COLOR = (255, 255, 150)
 
+def get_initial_window_size(display_size):
+    """Fit the simulator window to the available display while preserving its aspect ratio."""
+    display_width, display_height = display_size
+    available_width = max(1, display_width - 40)
+    available_height = max(1, display_height - 80)
+    scale = min(1, available_width / SCREEN_WIDTH, available_height / SCREEN_HEIGHT)
+    return max(1, int(SCREEN_WIDTH * scale)), max(1, int(SCREEN_HEIGHT * scale))
+
+def get_viewport(window_size):
+    """Return the centered canvas area and scale factor for a resizable window."""
+    window_width, window_height = window_size
+    scale = min(window_width / SCREEN_WIDTH, window_height / SCREEN_HEIGHT)
+    width = int(SCREEN_WIDTH * scale)
+    height = int(SCREEN_HEIGHT * scale)
+    return pygame.Rect((window_width - width) // 2, (window_height - height) // 2, width, height), scale
+
+def map_event_to_canvas(event, viewport, scale):
+    """Convert mouse coordinates from the window into the simulator's logical canvas."""
+    if hasattr(event, "pos"):
+        event_data = event.dict.copy()
+        event_data["pos"] = (
+            int((event.pos[0] - viewport.x) / scale),
+            int((event.pos[1] - viewport.y) / scale),
+        )
+        return pygame.event.Event(event.type, event_data)
+    return event
+
 class CRT:
     """
     Clase que encapsula la física del CRT.
@@ -163,7 +190,12 @@ def draw_front_view(screen, font, title, rect, points_on_screen, current_point):
 
 def main():
     pygame.init()
-    screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+    display_info = pygame.display.Info()
+    window = pygame.display.set_mode(
+        get_initial_window_size((display_info.current_w, display_info.current_h)),
+        pygame.RESIZABLE,
+    )
+    canvas = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
     pygame.display.set_caption("Simulador de Tubo de Rayos Catódicos (CRT) - Versión Verificada")
     font = pygame.font.SysFont("sans", 20)
     clock = pygame.time.Clock()
@@ -197,7 +229,13 @@ def main():
         sim_time = pygame.time.get_ticks() / 1000.0
 
         for event in pygame.event.get():
-            if event.type == pygame.QUIT: running = False
+            if event.type == pygame.QUIT:
+                running = False
+                continue
+            if event.type == pygame.VIDEORESIZE:
+                window = pygame.display.set_mode(event.size, pygame.RESIZABLE)
+            viewport, scale = get_viewport(window.get_size())
+            event = map_event_to_canvas(event, viewport, scale)
             for s in sliders.values(): s.handle_event(event)
             if btn_manual.handle_event(event): mode = "Manual"
             if btn_sinusoidal.handle_event(event): mode = "Sinusoidal"
@@ -241,13 +279,16 @@ def main():
             points_on_screen.pop(0)
 
         # --- DIBUJO EN PANTALLA ---
-        screen.fill(BG_COLOR)
-        draw_side_view(screen, font, "Vista Superior (Deflexión Horizontal Z)", top_rect, trajectory, 'top', max_deflect_m)
-        draw_side_view(screen, font, "Vista Lateral (Deflexión Vertical Y)", side_rect, trajectory, 'side', max_deflect_m)
-        draw_front_view(screen, font, "Pantalla (Vista Frontal)", front_rect, points_on_screen, current_point)
-        for s in sliders.values(): s.draw(screen, font)
-        btn_manual.draw(screen, font); btn_sinusoidal.draw(screen, font)
+        canvas.fill(BG_COLOR)
+        draw_side_view(canvas, font, "Vista Superior (Deflexión Horizontal Z)", top_rect, trajectory, 'top', max_deflect_m)
+        draw_side_view(canvas, font, "Vista Lateral (Deflexión Vertical Y)", side_rect, trajectory, 'side', max_deflect_m)
+        draw_front_view(canvas, font, "Pantalla (Vista Frontal)", front_rect, points_on_screen, current_point)
+        for s in sliders.values(): s.draw(canvas, font)
+        btn_manual.draw(canvas, font); btn_sinusoidal.draw(canvas, font)
 
+        viewport, _ = get_viewport(window.get_size())
+        window.fill(BG_COLOR)
+        window.blit(pygame.transform.smoothscale(canvas, viewport.size), viewport.topleft)
         pygame.display.flip()
         clock.tick(60)
 
